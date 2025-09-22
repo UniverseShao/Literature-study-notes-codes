@@ -110,8 +110,22 @@ mediation_proportion
 
 # 第二种方法：手动bootstrap-----------------------------------------------------------------
 # ==============================================================================
-# 黄金标准: 使用手动Bootstrap对时变中介变量进行中介分析
+# 改进版: 使用手动Bootstrap对时变中介变量进行中介分析
+# 采用"差值法"(c - c')计算中介比例，更适合Cox回归框架
 # ==============================================================================
+
+# *** 重要方法学说明 ***
+# 传统的"乘积法"(a×b)在时变中介+Cox回归框架下存在以下问题：
+# 1. HR不具备可加性：总效应c ≠ 直接效应c' + 间接效应a×b
+# 2. 量纲不匹配：时变斜率(a) × 瞬时风险系数(b)缺乏明确的时间积分意义
+# 3. 因果解释困难：在HR尺度下，乘积法的中介比例难以解释
+#
+# 本脚本采用的"差值法"优势：
+# ✓ 基于同一Cox框架：总效应c和直接效应c'都来自Cox模型
+# ✓ 逻辑一致性：间接效应 = c - c'，中介比例 = (c-c')/c
+# ✓ 因果可解释：在RCT设定下，差值法具有较好的因果含义
+# ✓ 稳健性：Bootstrap提供非参数置信区间，无需正态性假设
+# ✓ 时变处理：使用cluster()调整个体内相关性，处理时变协变量更合理
 
 # --- 步骤 0: 准备工作 - 加载额外包 ---
 # lme4 包用于拟合线性混合效应模型
@@ -125,97 +139,253 @@ library(lme4)
 n_boot <- 500 # Bootstrap重复次数。建议至少1000次，此处为演示设为500
 set.seed(42) # 保证结果可重复
 
-# 创建一个向量来存储每次Bootstrap的间接效应结果
-indirect_effects_boot <- numeric(n_boot)
+# 创建向量来存储每次Bootstrap的结果
+total_effects_boot <- numeric(n_boot)      # 总效应 c
+direct_effects_boot <- numeric(n_boot)     # 直接效应 c'
+indirect_effects_boot <- numeric(n_boot)   # 间接效应 c - c'
+mediation_proportions_boot <- numeric(n_boot) # 中介比例 (c - c')/c
+
+# 记录成功的迭代次数
+successful_iterations <- 0
 
 # --- 步骤 2: 执行Bootstrap循环 ---
 # 这个过程可能需要几分钟，取决于您的电脑性能和n_boot的大小
 cat(paste0("开始执行 ", n_boot, " 次Bootstrap模拟...\n"))
+cat("使用差值法 (c - c') 计算中介效应，更适合Cox回归框架\n\n")
 
 for (i in 1:n_boot) {
-  # --- 2.1 对研究对象(id)进行有放回的重抽样 ---
-  boot_ids <- sample(unique(baseline_data$id), size = n_patients, replace = TRUE)
-  
-  # 创建自助样本，需要从原始数据中提取对应id的所有记录
-  boot_baseline_data <- baseline_data[match(boot_ids, baseline_data$id), ]
-  # 需要处理重复ID的问题，为自助样本创建新的唯一ID
-  boot_baseline_data$new_id <- 1:n_patients
-  
-  # 对应地创建自助长格式数据和生存数据
-  boot_long_data <- long_data %>% filter(id %in% boot_ids) %>%
-    left_join(dplyr::select(boot_baseline_data, id, new_id), by="id")
-  
-  boot_event_data <- event_data %>% filter(id %in% boot_ids) %>%
-    left_join(dplyr::select(boot_baseline_data, id, new_id), by="id")
-  
-  
-  # --- 2.2 在自助样本上拟合模型 a (LMM) ---
-  # 使用lmer评估治疗对LVH变化轨迹(斜率)的影响
-  # (1|new_id)表示为每个患者设置随机截距
-  # visit_time:treatment 表示我们关心治疗是否改变了LVH随时间变化的斜率
-  model_a_boot <- lmer(lvh_index ~ visit_time * treatment + age + sex + (1 | new_id), 
-                       data = boot_long_data,
-                       # 忽略收敛警告，因为在某些自助样本中可能出现拟合问题
-                       control = lmerControl(check.nobs.vs.nRE = "ignore"))
-  
-  # 路径 a 的系数: 治疗对斜率的交互影响
-  coef_a_boot <- fixef(model_a_boot)["visit_time:treatment"]
-  
-  # --- 2.3 在自助样本上拟合模型 b (Cox with TDC) ---
-  # 准备时变数据格式
-  boot_final_data <- tmerge(
-    data1 = dplyr::select(boot_baseline_data, new_id, treatment, age, sex),
-    data2 = dplyr::select(boot_event_data, new_id, observed_time, status),
-    id = new_id,
-    event = event(observed_time, status)
-  )
-  boot_final_data <- tmerge(
-    data1 = boot_final_data,
-    data2 = dplyr::select(boot_long_data, new_id, visit_time, lvh_index),
-    id = new_id,
-    lvh = tdc(visit_time, lvh_index)
-  )
-  
-  model_b_boot <- coxph(Surv(tstart, tstop, event) ~ treatment + lvh + age + sex, 
-                        data = boot_final_data)
-  
-  # 路径 b 的系数
-  coef_b_boot <- coef(model_b_boot)["lvh"]
-  
-  # --- 2.4 计算并存储本次循环的间接效应 ---
-  indirect_effects_boot[i] <- coef_a_boot * coef_b_boot
+  # 使用tryCatch处理可能的模型拟合失败
+  tryCatch({
+    # --- 2.1 对研究对象(id)进行有放回的重抽样 ---
+    boot_ids <- sample(unique(baseline_data$id), size = n_patients, replace = TRUE)
+    
+    # 创建自助样本，需要从原始数据中提取对应id的所有记录
+    boot_baseline_data <- baseline_data[match(boot_ids, baseline_data$id), ]
+    # 需要处理重复ID的问题，为自助样本创建新的唯一ID
+    boot_baseline_data$new_id <- 1:n_patients
+    
+    # 对应地创建自助长格式数据和生存数据
+    boot_long_data <- long_data %>% filter(id %in% boot_ids) %>%
+      left_join(dplyr::select(boot_baseline_data, id, new_id), by="id")
+    
+    boot_event_data <- event_data %>% filter(id %in% boot_ids) %>%
+      left_join(dplyr::select(boot_baseline_data, id, new_id), by="id")
+    
+    # --- 2.2 估计总效应 c (不含时变LVH的Cox模型) ---
+    boot_total_df <- dplyr::left_join(
+      boot_event_data, 
+      dplyr::select(boot_baseline_data, new_id, treatment, age, sex),
+      by = "new_id"
+    )
+    
+    model_total_boot <- coxph(Surv(observed_time, status) ~ treatment + age + sex,
+                              data = boot_total_df)
+    coef_c_boot <- coef(model_total_boot)["treatment"]
+    
+    # --- 2.3 估计直接效应 c' (含时变LVH的Cox模型) ---
+    # 准备时变数据格式
+    boot_final_data <- tmerge(
+      data1 = dplyr::select(boot_baseline_data, new_id, treatment, age, sex),
+      data2 = dplyr::select(boot_event_data, new_id, observed_time, status),
+      id = new_id,
+      event = event(observed_time, status)
+    )
+    boot_final_data <- tmerge(
+      data1 = boot_final_data,
+      data2 = dplyr::select(boot_long_data, new_id, visit_time, lvh_index),
+      id = new_id,
+      lvh = tdc(visit_time, lvh_index)
+    )
+    
+    # 使用cluster(new_id)获得稳健标准误，因为每个个体被拆成多条记录
+    model_direct_boot <- coxph(Surv(tstart, tstop, event) ~ treatment + lvh + age + sex + cluster(new_id), 
+                               data = boot_final_data)
+    coef_c_prime_boot <- coef(model_direct_boot)["treatment"]
+    
+    # --- 2.4 基于log-HR的"差值法"计算中介效应 ---
+    indirect_boot <- as.numeric(coef_c_boot - coef_c_prime_boot)  # 间接效应 = c - c'
+    
+    # 计算中介比例，处理分母接近0的情况
+    if (abs(coef_c_boot) > 1e-6) {  # 避免除以接近0的数
+      pm_boot <- as.numeric(indirect_boot / coef_c_boot)  # 中介比例 = (c - c')/c
+    } else {
+      pm_boot <- NA  # 总效应接近0时，中介比例无意义
+    }
+    
+    # --- 2.5 存储本次迭代的结果 ---
+    total_effects_boot[i] <- as.numeric(coef_c_boot)
+    direct_effects_boot[i] <- as.numeric(coef_c_prime_boot)
+    indirect_effects_boot[i] <- indirect_boot
+    mediation_proportions_boot[i] <- pm_boot
+    
+    successful_iterations <- successful_iterations + 1
+    
+  }, error = function(e) {
+    # 如果模型拟合失败，记录为NA
+    total_effects_boot[i] <- NA
+    direct_effects_boot[i] <- NA
+    indirect_effects_boot[i] <- NA
+    mediation_proportions_boot[i] <- NA
+    
+    # 可选：打印错误信息（用于调试）
+    # cat(paste0("迭代 ", i, " 失败: ", e$message, "\n"))
+  })
   
   # 打印进度
-  if (i %% 50 == 0) cat(paste0("已完成 ", i, "/", n_boot, " 次迭代...\n"))
+  if (i %% 50 == 0) {
+    cat(paste0("已完成 ", i, "/", n_boot, " 次迭代... (成功: ", successful_iterations, ")\n"))
+  }
 }
 
 cat("Bootstrap模拟完成!\n")
-
+cat(paste0("成功完成的迭代次数: ", successful_iterations, "/", n_boot, "\n\n"))
 
 # --- 步骤 3: 分析Bootstrap结果 ---
 cat("\n=================================================================\n")
-cat("          手动Bootstrap中介分析 - 最终结果\n")
+cat("          改进版Bootstrap中介分析 - 最终结果\n")
+cat("          使用差值法 (c - c') 计算中介效应\n")
 cat("=================================================================\n\n")
 
-# 点估计 (使用中位数更稳健)
-point_estimate <- median(indirect_effects_boot, na.rm = TRUE)
+# 移除失败的迭代（NA值）
+valid_indices <- !is.na(mediation_proportions_boot) & !is.na(indirect_effects_boot)
+valid_total <- total_effects_boot[valid_indices]
+valid_direct <- direct_effects_boot[valid_indices]
+valid_indirect <- indirect_effects_boot[valid_indices]
+valid_pm <- mediation_proportions_boot[valid_indices]
 
-# 计算95%置信区间
-ci_lower <- quantile(indirect_effects_boot, 0.025, na.rm = TRUE)
-ci_upper <- quantile(indirect_effects_boot, 0.975, na.rm = TRUE)
+cat(paste0("有效的Bootstrap样本数: ", sum(valid_indices), "/", n_boot, "\n\n"))
 
-cat(paste0("间接效应的点估计 (Median): ", round(point_estimate, 5), "\n"))
-cat(paste0("95% Bootstrap置信区间: [", round(ci_lower, 5), ", ", round(ci_upper, 5), "]\n\n"))
+# === 1. 总效应 (c) 的Bootstrap结果 ===
+cat("--- 1. 总效应 (c: Treatment → Outcome) ---\n")
+total_point <- median(valid_total, na.rm = TRUE)
+total_ci_lower <- quantile(valid_total, 0.025, na.rm = TRUE)
+total_ci_upper <- quantile(valid_total, 0.975, na.rm = TRUE)
 
-# --- 结论 ---
-if (ci_lower * ci_upper > 0) { # 如果CI的下限和上限同号 (都不包含0)
-  cat("结论: 间接效应具有统计学显著性。\n")
-  cat("我们有证据表明，治疗通过影响LVH的变化轨迹，进而影响了心血管结局。\n")
+cat(paste0("总效应 log-HR (中位数): ", round(total_point, 5), "\n"))
+cat(paste0("95% Bootstrap置信区间: [", round(total_ci_lower, 5), ", ", round(total_ci_upper, 5), "]\n"))
+cat(paste0("总效应 HR (中位数): ", round(exp(total_point), 3), "\n"))
+cat(paste0("总效应 HR 95%CI: [", round(exp(total_ci_lower), 3), ", ", round(exp(total_ci_upper), 3), "]\n\n"))
+
+# === 2. 直接效应 (c') 的Bootstrap结果 ===
+cat("--- 2. 直接效应 (c': Treatment → Outcome | LVH) ---\n")
+direct_point <- median(valid_direct, na.rm = TRUE)
+direct_ci_lower <- quantile(valid_direct, 0.025, na.rm = TRUE)
+direct_ci_upper <- quantile(valid_direct, 0.975, na.rm = TRUE)
+
+cat(paste0("直接效应 log-HR (中位数): ", round(direct_point, 5), "\n"))
+cat(paste0("95% Bootstrap置信区间: [", round(direct_ci_lower, 5), ", ", round(direct_ci_upper, 5), "]\n"))
+cat(paste0("直接效应 HR (中位数): ", round(exp(direct_point), 3), "\n"))
+cat(paste0("直接效应 HR 95%CI: [", round(exp(direct_ci_lower), 3), ", ", round(exp(direct_ci_upper), 3), "]\n\n"))
+
+# === 3. 间接效应 (c - c') 的Bootstrap结果 ===
+cat("--- 3. 间接效应 (c - c': 通过LVH的中介效应) ---\n")
+indirect_point <- median(valid_indirect, na.rm = TRUE)
+indirect_ci_lower <- quantile(valid_indirect, 0.025, na.rm = TRUE)
+indirect_ci_upper <- quantile(valid_indirect, 0.975, na.rm = TRUE)
+
+cat(paste0("间接效应 log-HR (中位数): ", round(indirect_point, 5), "\n"))
+cat(paste0("95% Bootstrap置信区间: [", round(indirect_ci_lower, 5), ", ", round(indirect_ci_upper, 5), "]\n\n"))
+
+# === 4. 中介比例 (PM) 的Bootstrap结果 ===
+cat("--- 4. 中介比例 (PM = (c - c')/c) ---\n")
+pm_point <- median(valid_pm, na.rm = TRUE)
+pm_ci_lower <- quantile(valid_pm, 0.025, na.rm = TRUE)
+pm_ci_upper <- quantile(valid_pm, 0.975, na.rm = TRUE)
+
+cat(paste0("中介比例 (中位数): ", round(pm_point, 3), " (", round(pm_point * 100, 1), "%)\n"))
+cat(paste0("95% Bootstrap置信区间: [", round(pm_ci_lower, 3), ", ", round(pm_ci_upper, 3), "]"))
+cat(paste0(" ([", round(pm_ci_lower * 100, 1), "%, ", round(pm_ci_upper * 100, 1), "%])\n\n"))
+
+# === 5. 统计学显著性判断 ===
+cat("--- 5. 统计学显著性评估 ---\n")
+
+# 间接效应的显著性
+if (indirect_ci_lower * indirect_ci_upper > 0) {
+  cat("✓ 间接效应具有统计学显著性 (95%CI不包含0)\n")
+  indirect_significant <- TRUE
 } else {
-  cat("结论: 间接效应没有统计学显著性。\n")
-  cat("我们没有足够的证据表明LVH在此处扮演了中介角色。\n")
+  cat("✗ 间接效应没有统计学显著性 (95%CI包含0)\n")
+  indirect_significant <- FALSE
 }
 
+# 中介比例的显著性（通常看间接效应是否显著）
+if (indirect_significant) {
+  cat("✓ 中介效应具有统计学意义\n")
+  cat(paste0("  治疗效应中约有 ", round(abs(pm_point) * 100, 1), "% 是通过LVH变化实现的\n"))
+} else {
+  cat("✗ 中介效应没有统计学意义\n")
+  cat("  没有足够证据表明LVH在治疗效应中起中介作用\n")
+}
+
+cat("\n--- 6. 方法学说明 ---\n")
+cat("本分析采用'差值法'计算中介效应，相比传统'乘积法'具有以下优势:\n")
+cat("• 所有效应估计都基于同一Cox回归框架，保证了方法的一致性\n")
+cat("• 避免了HR尺度下'乘积法'的理论问题（HR不具备可加性）\n")
+cat("• 时变协变量的处理更加合理，使用cluster()调整了个体内相关性\n")
+cat("• Bootstrap方法提供了稳健的置信区间，无需正态性假设\n")
+cat("• 差值法 (c - c') 在RCT设定下具有较好的因果解释性\n\n")
+
+# === 7. 结果解释指南 ===
+cat("--- 7. 结果解释 ---\n")
+if (indirect_significant) {
+  if (pm_point > 0) {
+    cat("解释: 强化治疗通过降低LVH指标，进而降低了心血管事件风险。\n")
+    cat(paste0("LVH的改善解释了治疗总效应的 ", round(pm_point * 100, 1), "%。\n"))
+  } else {
+    cat("解释: 存在统计学显著的中介效应，但方向需要进一步解释。\n")
+  }
+} else {
+  cat("解释: 虽然治疗可能对LVH和心血管结局都有影响，\n")
+  cat("但没有足够证据表明LVH变化是治疗效应的重要中介路径。\n")
+  cat("治疗可能通过其他机制（如血压、血管功能等）发挥作用。\n")
+}
+
+cat("\n=================================================================\n")
+cat("                    分析完成\n")
+cat("=================================================================\n")
+
 # 第二种方法是更可靠的，第一种方法是非常不严谨的
+
+# ==============================================================================
+# 总结与建议
+# ==============================================================================
+
+cat(paste(rep("=", 70), collapse = ""), "\n")
+cat("                    脚本总结与建议\n")
+cat(paste(rep("=", 70), collapse = ""), "\n\n")
+
+cat("本脚本实现了两种中介分析方法的对比：\n\n")
+
+cat("【方法1: 传统系数乘积法】\n")
+cat("• 使用 a×b 计算间接效应，其中：\n")
+cat("  - a: 治疗对第3年LVH的影响（线性回归）\n") 
+cat("  - b: 时变LVH对结局的影响（Cox回归）\n")
+cat("• 问题：量纲不匹配，HR尺度下缺乏严格的因果解释\n")
+cat("• 结论：仅作为探索性分析，不建议作为主要结果报告\n\n")
+
+cat("【方法2: 改进的差值法 + Bootstrap】★ 推荐\n")
+cat("• 使用 c - c' 计算间接效应，其中：\n")
+cat("  - c: 总效应（不含LVH的Cox模型）\n")
+cat("  - c': 直接效应（含时变LVH的Cox模型）\n")
+cat("• 优势：方法一致性好，因果解释清晰，统计推断稳健\n")
+cat("• 结论：适合作为主要分析结果，符合现代中介分析标准\n\n")
+
+cat("【实际应用建议】\n")
+cat("1. 论文报告：以方法2的结果为主，方法1可作为敏感性分析\n")
+cat("2. Bootstrap次数：正式分析建议使用1000-5000次\n")
+cat("3. 模型诊断：检查Cox模型的比例风险假设\n")
+cat("4. 敏感性分析：\n")
+cat("   - 尝试不同的LVH测量时点\n")
+cat("   - 考虑非线性关系（样条函数）\n")
+cat("   - 评估未测量混杂因子的影响\n\n")
+
+cat("【进一步改进方向】\n")
+cat("• G-formula方法：在特定时点计算风险差的自然间接效应\n")
+cat("• 联合建模：使用JM包处理纵向数据与生存数据的联合分析\n")
+cat("• 因果中介分析：结合倾向性评分或工具变量方法\n\n")
+
+cat(paste(rep("=", 70), collapse = ""), "\n")
+cat("脚本执行完毕。建议重点关注方法2的Bootstrap中介分析结果。\n")
+cat(paste(rep("=", 70), collapse = ""), "\n")
 
 
