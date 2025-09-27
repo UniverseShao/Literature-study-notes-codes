@@ -51,3 +51,8 @@ SII = (Plt × N/L)，SIRI = (N × M/L)，NLR = N/L，PLR = P/L，PNR = P/N，NHR
 
 # 6.(CABANA模拟RCT分析+房颤消融vs药物+Cox+Fine-Gray+倾向重叠评分+混合效应模型全流程)  
 隔壁组的新发的CABANA分析文章，模拟RCT分析的对照表可能是文章的新颖的创新点模拟RCT分析
+
+
+
+
+# 9.(分箱式亚组分析+连续性交互作用曲线+不调整协变量满足真实世界)  
