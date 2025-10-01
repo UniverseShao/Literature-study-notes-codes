@@ -1,4 +1,4 @@
-<img width="1530" height="2490" alt="image" src="https://github.com/user-attachments/assets/95c8f818-ca58-4667-8597-82f4bb08763b" /># 1.单逻辑+Boruta算法+Lasso+机器学习+shap 
+# 1.单逻辑+Boruta算法+Lasso+机器学习+shap 
 第一篇文献是专注于构建预测模型，所以采用单逻辑回归+Boruta算法+Lasso+机器学习的方法来确定了一些重要的预测变量并证明测试集和训练集之间是可比的(类似于基线没有差异)  
 将这些变量用于机器学习预测模型的构建之后  
 从而得到最优秀的预测模型，利用好shap对模型进行解释，再进一步说明重要变量  
