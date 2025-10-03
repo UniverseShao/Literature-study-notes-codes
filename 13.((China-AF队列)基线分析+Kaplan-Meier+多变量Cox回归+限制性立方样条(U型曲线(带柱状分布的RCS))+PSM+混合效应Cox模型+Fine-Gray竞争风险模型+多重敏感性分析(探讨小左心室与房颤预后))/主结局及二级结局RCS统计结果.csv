@@ -1,0 +1,5 @@
+"Outcome","Events","Event_Rate","P_Overall","P_Nonlinear"
+"A: CV death or major bleeding",1272,"42.4%",0,0
+"B: Cardiovascular death",1104,"36.8%",0,0
+"C: Ischemic stroke/SE",496,"16.5%",0.000132994746036896,3.79387648131724e-05
+"D: Major bleeding",660,"22.0%",2.38076225400619e-12,1.33415500869205e-12

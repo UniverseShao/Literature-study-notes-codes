@@ -1,0 +1,7 @@
+"Subgroup","Variable","P_Overall","P_Nonlinear","P_Interaction"
+"A","sex",0,0,0.000453462754064105
+"B","age_group",0,0,0.081161760903273
+"C","bmi_group",0,0,0.796822555339792
+"D","ablation",0,0,0.256151798250781
+"E","diabetes",0,0,0.609490913651696
+"F","lv_hypertrophy",0,0,0.490969512785885
