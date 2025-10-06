@@ -14,8 +14,8 @@ cat("\n========== 生成模拟UK Biobank数据 ==========\n")
 
 set.seed(12345)  # 设置随机种子以确保可重复性
 
-# 样本量
-n <- 30000
+# 样本量（增加样本量使曲线更平滑）
+n <- 50000
 
 # 生成模拟数据
 data <- data.frame(
@@ -69,73 +69,73 @@ data$LVEDVi <- ifelse(
 # 确保LVEDVi在合理范围内
 data$LVEDVi <- pmax(40, pmin(data$LVEDVi, 150))
 
-# 生成随访时间（年）
-follow_up_years <- runif(n, min = 0.5, max = 12)
+# 生成随访时间（年）- 使用更真实的分布，减少删失
+follow_up_years <- rgamma(n, shape = 2.5, scale = 2.8) + 0.5
+follow_up_years <- pmin(follow_up_years, 12)  # 限制最大随访时间为12年
 
 # 为每个结局生成事件和时间
-# 基础风险受多个因素影响（降低基础风险，让Normal组成为真正的低风险组）
+# 基础风险受多个因素影响（提高基础风险以减少删失）
 base_risk <- with(data, {
-  risk <- 0.015 +  # 降低基础风险到0.015，让Normal组风险更低
-    0.001 * (age - 55) + 
+  risk <- 0.015 +  # 提高基础风险
+    0.0008 * (age - 55) +
     0.002 * (BMI > 30) +
-    0.003 * hypertension +
-    0.005 * diabetes +
+    0.004 * hypertension +
+    0.006 * diabetes +
     0.008 * prior_CVD +
     0.003 * (smoking_status == "Current")
   risk
 })
 
-# LV大小对风险的影响（极端差异化效应，确保三组曲线完全分离）
+# LV大小对风险的影响（优化后的风险差异，确保曲线清晰分离）
 lv_risk_effect <- with(data, {
   ifelse(sex == "Male",
-         # 男性：Small LV风险极高，Normal LV为参考组，Large LV风险适度降低
-         ifelse(LVEDVi < 68, 0.85,    # Small LV: 极高风险（85%增加）
-                ifelse(LVEDVi > 88, -0.15, 0.0)),  # Large LV: 适度降低（-15%），Normal LV: 参考组（0%）
+         # 男性：Small LV高风险，Normal LV为参考组，Large LV中度风险
+         ifelse(LVEDVi < 68, 0.60,    # Small LV: 高风险（60%增加）
+                ifelse(LVEDVi > 88, 0.20, 0.0)),  # Large LV: 中度增加（20%），Normal LV: 参考组（0%）
          # 女性：相同逻辑但切点不同
-         ifelse(LVEDVi < 60, 0.85,    # Small LV: 极高风险（85%增加）
-                ifelse(LVEDVi > 76, -0.15, 0.0))   # Large LV: 适度降低（-15%），Normal LV: 参考组（0%）
+         ifelse(LVEDVi < 60, 0.60,    # Small LV: 高风险（60%增加）
+                ifelse(LVEDVi > 76, 0.20, 0.0))   # Large LV: 中度增加（20%），Normal LV: 参考组（0%）
   )
 })
 
-# MACE（主要心血管不良事件）- 极端差异化
-mace_risk <- pmax(0.005, pmin(base_risk + lv_risk_effect * 35.0, 0.90))  # 大幅增加乘数到35.0
-# 确保概率值有效且生成的事件无NA
-mace_prob <- pmax(0, pmin(mace_risk * follow_up_years / 1.0, 0.95))  # 调整除数到1.0增加事件率
+# MACE（主要心血管不良事件）- 大幅提高事件率以减少删失
+mace_risk <- pmax(0.008, pmin(base_risk * 1.5 + lv_risk_effect * 0.35, 0.65))  # 大幅提高风险
+mace_prob <- pmax(0, pmin(mace_risk * follow_up_years / 3.5, 0.55))  # 提高事件率到55%
 data$MACE_event <- rbinom(n, 1, mace_prob)
 data$MACE_time <- ifelse(data$MACE_event == 1,
-                         runif(n, 0.5, follow_up_years),
+                         pmin(rexp(n, rate = 1/2.5) + 0.5, follow_up_years),
                          follow_up_years)
 
-# CHD（冠心病）
-chd_risk <- pmax(0.005, pmin(base_risk + lv_risk_effect * 30.0, 0.85))  # 增加乘数到30.0
-chd_prob <- pmax(0, pmin(chd_risk * follow_up_years / 1.0, 0.95))
+# CHD（冠心病）- 提高事件率
+chd_risk <- pmax(0.008, pmin(base_risk * 1.3 + lv_risk_effect * 0.30, 0.60))
+chd_prob <- pmax(0, pmin(chd_risk * follow_up_years / 3.8, 0.50))
 data$CHD_event <- rbinom(n, 1, chd_prob)
 data$CHD_time <- ifelse(data$CHD_event == 1,
-                        runif(n, 0.5, follow_up_years),
+                        pmin(rexp(n, rate = 1/2.8) + 0.5, follow_up_years),
                         follow_up_years)
 
-# HF（心力衰竭）
-hf_risk <- pmax(0.005, pmin(base_risk + lv_risk_effect * 40.0, 0.90))  # 大幅增加乘数到40.0
-hf_prob <- pmax(0, pmin(hf_risk * follow_up_years / 1.0, 0.95))
+# HF（心力衰竭）- 提高事件率
+hf_risk <- pmax(0.008, pmin(base_risk * 1.4 + lv_risk_effect * 0.38, 0.62))
+hf_prob <- pmax(0, pmin(hf_risk * follow_up_years / 3.2, 0.52))
 data$HF_event <- rbinom(n, 1, hf_prob)
 data$HF_time <- ifelse(data$HF_event == 1,
-                       runif(n, 0.5, follow_up_years),
+                       pmin(rexp(n, rate = 1/2.2) + 0.5, follow_up_years),
                        follow_up_years)
 
-# Stroke（卒中）
-stroke_risk <- pmax(0.005, pmin(base_risk + lv_risk_effect * 32.0, 0.85))  # 大幅增加乘数到32.0
-stroke_prob <- pmax(0, pmin(stroke_risk * follow_up_years / 1.0, 0.95))
+# Stroke（卒中）- 提高事件率
+stroke_risk <- pmax(0.008, pmin(base_risk * 1.2 + lv_risk_effect * 0.32, 0.58))
+stroke_prob <- pmax(0, pmin(stroke_risk * follow_up_years / 4.0, 0.48))
 data$stroke_event <- rbinom(n, 1, stroke_prob)
 data$stroke_time <- ifelse(data$stroke_event == 1,
-                           runif(n, 0.5, follow_up_years),
+                           pmin(rexp(n, rate = 1/3.0) + 0.5, follow_up_years),
                            follow_up_years)
 
-# Death（全因死亡）
-death_risk <- pmax(0.005, pmin(base_risk * 3.0 + lv_risk_effect * 45.0, 0.90))  # 大幅调整乘数到45.0
-death_prob <- pmax(0, pmin(death_risk * follow_up_years / 1.0, 0.95))
+# Death（全因死亡）- 提高事件率
+death_risk <- pmax(0.008, pmin(base_risk * 2.5 + lv_risk_effect * 0.40, 0.70))
+death_prob <- pmax(0, pmin(death_risk * follow_up_years / 3.0, 0.58))
 data$death_event <- rbinom(n, 1, death_prob)
 data$death_time <- ifelse(data$death_event == 1,
-                          runif(n, 0.5, follow_up_years),
+                          pmin(rexp(n, rate = 1/3.2) + 0.5, follow_up_years),
                           follow_up_years)
 
 # 非CVD死亡（用于竞争风险分析）
@@ -464,40 +464,48 @@ cat("\n----- 4.2 Kaplan-Meier生存曲线 -----\n")
 # 创建保存图形的文件夹（PNG格式，更稳定）
 if (!dir.exists("Figures")) dir.create("Figures")
 
-# 绘制MACE的KM曲线（Figure 1A）- 最终优化版本
+# 绘制MACE的KM曲线（Figure 1A）- SCI期刊专业风格（优化删失显示）
 fit_MACE <- survfit(Surv(MACE_time, MACE_event) ~ LV_size_category, data = data)
 
+# 使用Nature/NEJM风格配色：深蓝、深红、深橙
 km_plot_MACE <- ggsurvplot(
   fit_MACE,
   data = data,
   pval = TRUE,
   pval.method = TRUE,
-  conf.int = FALSE,
+  pval.coord = c(1, 0.15),  # p值位置
+  pval.size = 4.5,  # p值字体大小
+  conf.int = TRUE,  # 添加95%置信区间
+  conf.int.alpha = 0.15,  # 置信区间透明度
   risk.table = TRUE,
   risk.table.height = 0.25,
-  ggtheme = theme_bw(),
-  palette = c("#2E9FDF", "#E74C3C", "#F39C12"),  # 更鲜明的颜色：Normal=蓝, Small=红, Large=橙
+  risk.table.fontsize = 3.8,
+  ggtheme = theme_classic(),  # 使用经典主题（更专业）
+  palette = c("#0072B2", "#D55E00", "#009E73"),  # Nature风格配色：蓝、橙红、绿
   legend.title = "LV Size Category",
   legend.labs = c("Normal LV", "Small LV", "Large LV"),
   xlab = "Follow-up Time (years)",
-  ylab = "MACE-free Survival Probability",
-  title = "Figure 1A. Kaplan-Meier Survival Curves for MACE by LV Size Category",
-  font.title = 14,
-  font.legend = 12,
-  font.x = 12,
-  font.y = 12,
-  linetype = c("solid", "solid", "solid"),  # 所有线条都使用实线
-  size = 1.5,  # 进一步增加线条粗细
+  ylab = "Event-free Survival Probability",
+  title = "A. Major Adverse Cardiovascular Events",
+  font.title = c(16, "bold"),
+  font.legend = c(12, "plain"),
+  font.x = c(14, "plain"),
+  font.y = c(14, "plain"),
+  font.tickslab = c(12, "plain"),
+  linetype = c("solid", "dashed", "dotted"),  # 不同线型增强区分
+  size = 1.5,  # 增加线条粗细使曲线更清晰
+  censor = FALSE,  # 移除删失标记减少视觉杂乱
   xlim = c(0, 12),
-  ylim = c(0, 1),  # 设定完整Y轴范围
-  break.time.by = 2,  # x轴刻度间隔
-  break.y.by = 0.1,   # y轴刻度间隔，更细分
-  surv.scale = "percent",  # 使用百分比显示
-  tables.theme = theme_cleantable()  # 风险表清洁主题
+  ylim = c(0, 1),
+  break.time.by = 2,
+  break.y.by = 0.2,  # y轴间隔20%
+  surv.scale = "percent",
+  tables.theme = theme_cleantable(),
+  legend = c(0.15, 0.15)  # 图例位置（左下角）
 )
 
-# 保存为PNG格式（更稳定可靠）
-png("Figures/Figure1A_KM_MACE.png", width = 10*300, height = 8*300, res = 300, bg = "white")
+# 保存为高分辨率PNG（发表级质量）
+png("Figures/Figure1A_KM_MACE.png", width = 12*300, height = 10*300, res = 300, bg = "white")
 print(km_plot_MACE$plot)
 dev.off()
 cat("已保存：Figures/Figure1A_KM_MACE.png\n")
@@ -524,26 +532,35 @@ for (i in 1:length(other_outcomes)) {
     fit,
     data = data,
     pval = TRUE,
-    conf.int = FALSE,
+    pval.method = TRUE,
+    pval.method.coord = c(1.5, 0.15),
+    pval.method.size = 4,
+    pval.coord = c(1.5, 0.10),
+    pval.size = 4,
+    conf.int = TRUE,  # 添加置信区间
+    conf.int.alpha = 0.15,
     risk.table = FALSE,
-    ggtheme = theme_bw(),
-    palette = c("#2E9FDF", "#E74C3C", "#F39C12"),  # 与MAGE保持一致的颜色
+    ggtheme = theme_classic(),  # 经典主题
+    palette = c("#0072B2", "#D55E00", "#009E73"),  # Nature风格配色
     legend.title = "LV Size",
     legend.labs = c("Normal", "Small", "Large"),
     xlab = "Follow-up Time (years)",
-    ylab = "Event-free Survival Probability",
-    title = paste0("Panel ", LETTERS[i], ". ", label),
-    font.title = 12,
-    font.legend = 10,
-    font.x = 10,
-    font.y = 10,
-    linetype = c("solid", "solid", "solid"),
-    size = 1.3,  # 增加线条粗细
+    ylab = "Event-free Survival",
+    title = paste0(LETTERS[i], ". ", label),
+    font.title = c(14, "bold"),
+    font.legend = c(11, "plain"),
+    font.x = c(13, "plain"),
+    font.y = c(13, "plain"),
+    font.tickslab = c(11, "plain"),
+    linetype = c("solid", "dashed", "dotted"),  # 不同线型
+    size = 1.2,  # 增加线条粗细使曲线更清晰
+    censor = FALSE,  # 移除删失标记减少视觉杂乱
     xlim = c(0, 12),
-    ylim = c(0, 1),  # 设定完整Y轴范围
+    ylim = c(0, 1),
     break.time.by = 3,
-    break.y.by = 0.1,  # 更细分的y轴刻度
-    surv.scale = "percent"
+    break.y.by = 0.2,  # y轴间隔20%
+    surv.scale = "percent",
+    legend = "none"  # 使用共同图例
   )
   
   km_plots_list[[i]] <- km_plot$plot
@@ -555,14 +572,16 @@ for (i in 1:length(other_outcomes)) {
   dev.off()
 }
 
-# 合并四个图形为Figure 2
+# 合并四个图形为Figure 2（专业布局）
 figure2_combined <- ggarrange(plotlist = km_plots_list, 
                               ncol = 2, nrow = 2,
                               common.legend = TRUE,
-                              legend = "bottom")
+                              legend = "bottom",
+                              font.label = list(size = 14, face = "bold"))
 
+# 保存为高分辨率发表级图片
 png("Figures/Figure2_KM_All_Outcomes.png", 
-    width = 14*300, height = 12*300, res = 300, bg = "white")
+    width = 16*300, height = 14*300, res = 300, bg = "white")
 print(figure2_combined)
 dev.off()
 cat("已保存所有KM曲线图\n")
@@ -717,4 +736,3 @@ cat("\n工作空间已保存为：Analysis_Workspace.RData\n")
 ################################################################################
 # 代码结束
 ################################################################################
-
