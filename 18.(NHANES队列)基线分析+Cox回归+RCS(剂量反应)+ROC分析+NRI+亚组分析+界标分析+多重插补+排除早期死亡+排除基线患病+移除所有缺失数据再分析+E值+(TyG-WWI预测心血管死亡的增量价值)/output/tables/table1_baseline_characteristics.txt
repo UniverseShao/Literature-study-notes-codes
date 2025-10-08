@@ -1,0 +1,64 @@
+                               Stratified by cvd_death
+                                level                     0                 
+  n                                                          19440          
+  age (mean (SD))                                            44.52 (16.85)  
+  sex (%)                       Male                          9336 (48.0)   
+                                Female                       10104 (52.0)   
+  race_ethnicity (%)            Non-Hispanic White            3301 (17.0)   
+                                Non-Hispanic Black            3223 (16.6)   
+                                Mexican American              6428 (33.1)   
+                                Other                         6488 (33.4)   
+  education (%)                 Below high school             7704 (39.6)   
+                                High school or equivalent     3942 (20.3)   
+                                Above high school             7794 (40.1)   
+  pir_category (%)              Low                           1234 ( 6.8)   
+                                Medium                        2367 (13.0)   
+                                High                         14646 (80.3)   
+  smoking_status (%)            Current                       4860 (25.0)   
+                                Former                        4825 (24.8)   
+                                Never                         4841 (24.9)   
+                                Unknown                       4914 (25.3)   
+  drinking_status (%)           Current                       4820 (24.8)   
+                                Former                        4810 (24.7)   
+                                Never                         5014 (25.8)   
+                                Unknown                       4796 (24.7)   
+  TyG (mean (SD))                                           255.53 (43.11)  
+  TyG_WC (mean (SD))                                      24234.89 (6257.14)
+  TyG_WHtR (mean (SD))                                      144.63 (35.90)  
+  TyG_WWI (mean (SD))                                      2838.04 (687.63) 
+  triglyceride_mgdl (mean (SD))                             170.65 (41.13)  
+  glucose_mgdl (mean (SD))                                   99.91 (15.17)  
+  waist_cm (mean (SD))                                       94.23 (15.04)  
+  weight_kg (mean (SD))                                      74.58 (18.02)  
+                               Stratified by cvd_death
+                                1                  p      test
+  n                                 4815                      
+  age (mean (SD))                  66.78 (10.90)   <0.001     
+  sex (%)                           2834 (58.9)    <0.001     
+                                    1981 (41.1)               
+  race_ethnicity (%)                 801 (16.6)     0.357     
+                                     846 (17.6)               
+                                    1598 (33.2)               
+                                    1570 (32.6)               
+  education (%)                     1957 (40.6)     0.430     
+                                     955 (19.8)               
+                                    1903 (39.5)               
+  pir_category (%)                   310 ( 6.9)     0.304     
+                                     625 (13.8)               
+                                    3590 (79.3)               
+  smoking_status (%)                1211 (25.2)     0.804     
+                                    1166 (24.2)               
+                                    1223 (25.4)               
+                                    1215 (25.2)               
+  drinking_status (%)               1173 (24.4)     0.415     
+                                    1248 (25.9)               
+                                    1223 (25.4)               
+                                    1171 (24.3)               
+  TyG (mean (SD))                 299.13 (41.48)   <0.001     
+  TyG_WC (mean (SD))            32520.48 (6462.30) <0.001     
+  TyG_WHtR (mean (SD))            192.29 (36.88)   <0.001     
+  TyG_WWI (mean (SD))            3757.62 (742.35)  <0.001     
+  triglyceride_mgdl (mean (SD))   210.23 (36.12)   <0.001     
+  glucose_mgdl (mean (SD))        112.16 (14.82)   <0.001     
+  waist_cm (mean (SD))            108.49 (13.81)   <0.001     
+  weight_kg (mean (SD))            77.13 (18.39)   <0.001     
